@@ -1,9 +1,11 @@
 import React, { Component } from "react";
-import { getMovies } from "../services/fakeMovieService";
+import { toast } from "react-toastify";
+import { getMovies, deleteMovie } from "../services/movieService";
 import Pagination from "./common/pagination";
 import paginate from "../utils/paginate";
 import ListGroup from "./common/listGroup";
-import { getGenres } from "../services/fakeGenreService";
+import SearchBar from "./common/searchBar";
+import { getGenres } from "../services/genreService";
 import MoviesTable from "./moviesTable";
 import _ from "lodash";
 
@@ -12,14 +14,16 @@ class Movies extends Component {
     movies: [],
     genres: [],
     selectedGenre: {},
+    searchText: "",
     pageSize: 4,
     currentPage: 1,
     sortColumn: { path: "title", order: "asc" }
   };
 
-  componentDidMount() {
-    const movies = getMovies();
-    const genres = this.getGenres();
+  async componentDidMount() {
+    const { data } = await getGenres();
+    const genres = [{ _id: "", name: "All Genres" }, ...data];
+    const { data: movies } = await getMovies();
     this.setState({
       movies,
       genres,
@@ -27,16 +31,11 @@ class Movies extends Component {
     });
   }
 
-  getGenres() {
-    let genres = getGenres();
-    genres.unshift({ _id: "", name: "All Genres" });
-    return genres;
-  }
-
   getPagedData() {
     const {
       movies,
       selectedGenre,
+      searchText,
       sortColumn,
       currentPage,
       pageSize
@@ -47,20 +46,38 @@ class Movies extends Component {
         ? movies.filter(m => m.genre._id === selectedGenre._id)
         : movies;
 
+    const searchedMovies = searchText
+      ? filteredMovies.filter(m =>
+          m.title.toLowerCase().includes(searchText.toLowerCase())
+        )
+      : filteredMovies;
+
     const sortedMovies = _.orderBy(
-      filteredMovies,
+      searchedMovies,
       sortColumn.path,
       sortColumn.order
     );
+
     const paginatedMovies = paginate(sortedMovies, currentPage, pageSize);
 
-    return { totalCount: filteredMovies.length, data: paginatedMovies };
+    return { totalCount: searchedMovies.length, data: paginatedMovies };
   }
 
-  handleDelete = movie => {
+  handleDelete = async movie => {
+    const originalMovies = this.state.movies;
     const movies = [...this.state.movies];
     movies.splice(movies.indexOf(movie), 1);
     this.setState({ movies });
+
+    try {
+      await deleteMovie(movie._id);
+      toast.success("Movie has been deleted.");
+    } catch (ex) {
+      if (ex.response && ex.response.status === 404)
+        toast.error("This movie has already been deleted.");
+
+      this.setState({ movies: originalMovies });
+    }
   };
 
   handleLike = movie => {
@@ -76,7 +93,11 @@ class Movies extends Component {
   };
 
   handleGenreSelect = genre => {
-    this.setState({ selectedGenre: genre, currentPage: 1 });
+    this.setState({ selectedGenre: genre, searchText: "", currentPage: 1 });
+  };
+
+  handleSearch = searchText => {
+    this.setState({ searchText, selectedGenre: {}, currentPage: 1 });
   };
 
   handleSort = sortColumn => {
@@ -89,12 +110,13 @@ class Movies extends Component {
       currentPage,
       genres,
       selectedGenre,
+      searchText,
       sortColumn
     } = this.state;
 
-    const { totalCount: moviesCount, data: movies } = this.getPagedData();
+    const { user } = this.props;
 
-    if (moviesCount === 0) return <p>There are no movies to display.</p>;
+    const { totalCount: moviesCount, data: movies } = this.getPagedData();
 
     return (
       <div className="row">
@@ -108,7 +130,18 @@ class Movies extends Component {
           />
         </div>
         <div className="col-9">
+          {user && (
+            <button
+              onClick={() => this.props.history.push("/movies/new")}
+              className="btn btn-primary"
+              id="btn-new-movie"
+            >
+              New Movie
+            </button>
+          )}
+
           <p>Showing {moviesCount} movies in this database</p>
+          <SearchBar value={searchText} onChange={this.handleSearch} />
           <MoviesTable
             movies={movies}
             onLike={this.handleLike}
